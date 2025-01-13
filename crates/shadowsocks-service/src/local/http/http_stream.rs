@@ -27,10 +27,18 @@ impl ProxyHttpStream {
     }
 
     #[cfg(feature = "local-http-native-tls")]
-    pub async fn connect_https(stream: AutoProxyClientStream, domain: &str) -> io::Result<ProxyHttpStream> {
-        use native_tls::TlsConnector;
+    pub async fn connect_https(
+        stream: AutoProxyClientStream,
+        domain: &str,
+        ignore_invalid_certs: bool,
+    ) -> io::Result<ProxyHttpStream> {
+        use native_tls::{Certificate, TlsConnector, TlsConnectorBuilder};
 
-        let cx = match TlsConnector::builder().request_alpns(&["h2", "http/1.1"]).build() {
+        let cx = match TlsConnector::builder()
+            .danger_accept_invalid_certs(ignore_invalid_certs) // Accept invalid certs
+            .request_alpns(&["h2", "http/1.1"])
+            .build()
+        {
             Ok(c) => c,
             Err(err) => {
                 return Err(io::Error::new(ErrorKind::Other, format!("tls build: {err}")));
@@ -59,7 +67,11 @@ impl ProxyHttpStream {
     }
 
     #[cfg(feature = "local-http-rustls")]
-    pub async fn connect_https(stream: AutoProxyClientStream, domain: &str) -> io::Result<ProxyHttpStream> {
+    pub async fn connect_https(
+        stream: AutoProxyClientStream,
+        domain: &str,
+        ignore_invalid_certs: bool,
+    ) -> io::Result<ProxyHttpStream> {
         use log::warn;
         use once_cell::sync::Lazy;
         use rustls_native_certs::CertificateResult;
@@ -98,7 +110,45 @@ impl ProxyHttpStream {
             Arc::new(config)
         });
 
-        let connector = TlsConnector::from(TLS_CONFIG.clone());
+        static TLS_CONFIG_NO_VERIFICATION: Lazy<Arc<ClientConfig>> = Lazy::new(|| {
+            let mut config = ClientConfig::builder()
+                .with_root_certificates({
+                    // Load WebPKI roots (Mozilla's root certificates)
+                    let mut store = RootCertStore::empty();
+                    store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+                    let CertificateResult { certs, errors, .. } = rustls_native_certs::load_native_certs();
+                    if !errors.is_empty() {
+                        for error in errors {
+                            warn!("failed to load cert (native), error: {}", error);
+                        }
+                    }
+
+                    for cert in certs {
+                        if let Err(err) = store.add(cert) {
+                            warn!("failed to add cert (native), error: {}", err);
+                        }
+                    }
+
+                    store
+                })
+                .with_no_client_auth();
+
+            // Accept invalid certs
+            config
+                .dangerous()
+                .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
+
+            // Try to negotiate HTTP/2
+            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            Arc::new(config)
+        });
+
+        let connector = TlsConnector::from(if ignore_invalid_certs {
+            TLS_CONFIG_NO_VERIFICATION.clone()
+        } else {
+            TLS_CONFIG.clone()
+        });
 
         let host = match ServerName::try_from(domain) {
             Ok(n) => n,
@@ -163,5 +213,68 @@ impl AsyncWrite for ProxyHttpStream {
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
         forward_call!(self, poll_shutdown, cx)
+    }
+}
+
+use tokio_rustls::rustls::{
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    pki_types::{CertificateDer, ServerName, UnixTime},
+    DigitallySignedStruct, Error, SignatureScheme,
+};
+
+#[derive(Debug)]
+struct NoCertificateVerification {}
+
+impl ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        let mut res = vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+        ];
+        res.reverse();
+        res
+    }
+
+    fn requires_raw_public_keys(&self) -> bool {
+        false
     }
 }

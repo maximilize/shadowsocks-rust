@@ -102,12 +102,14 @@ impl TokioSleep {
 pub struct HttpClient<B> {
     #[allow(clippy::type_complexity)]
     cache_conn: Arc<Mutex<LruCache<Address, VecDeque<(HttpConnection<B>, Instant)>>>>,
+    ignore_invalid_certs: bool,
 }
 
 impl<B> Clone for HttpClient<B> {
     fn clone(&self) -> Self {
         HttpClient {
             cache_conn: self.cache_conn.clone(),
+            ignore_invalid_certs: self.ignore_invalid_certs,
         }
     }
 }
@@ -119,7 +121,7 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     fn default() -> Self {
-        HttpClient::new()
+        HttpClient::new(false)
     }
 }
 
@@ -130,9 +132,10 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     /// Create a new HttpClient
-    pub fn new() -> HttpClient<B> {
+    pub fn new(ignore_invalid_certs: bool) -> HttpClient<B> {
         HttpClient {
             cache_conn: Arc::new(Mutex::new(LruCache::with_expiry_duration(CONNECTION_EXPIRE_DURATION))),
+            ignore_invalid_certs,
         }
     }
 
@@ -188,7 +191,16 @@ where
             Address::SocketAddress(ref saddr) => Cow::Owned(saddr.ip().to_string()),
         };
 
-        let c = match HttpConnection::connect(context.clone(), scheme, host.clone(), &domain, balancer).await {
+        let c = match HttpConnection::connect(
+            context.clone(),
+            scheme,
+            host.clone(),
+            &domain,
+            balancer,
+            self.ignore_invalid_certs,
+        )
+        .await
+        {
             Ok(c) => c,
             Err(err) => {
                 error!("failed to connect to host: {}, error: {}", host, err);
@@ -261,6 +273,7 @@ where
         host: Address,
         domain: &str,
         balancer: Option<&PingBalancer>,
+        ignore_invalid_certs: bool,
     ) -> io::Result<HttpConnection<B>> {
         if *scheme != Scheme::HTTP && *scheme != Scheme::HTTPS {
             return Err(io::Error::new(ErrorKind::InvalidInput, "invalid scheme"));
@@ -271,7 +284,7 @@ where
         if *scheme == Scheme::HTTP {
             HttpConnection::connect_http_http1(scheme, host, stream).await
         } else if *scheme == Scheme::HTTPS {
-            HttpConnection::connect_https(scheme, host, domain, stream).await
+            HttpConnection::connect_https(scheme, host, domain, stream, ignore_invalid_certs).await
         } else {
             unreachable!()
         }
@@ -315,11 +328,12 @@ where
         host: Address,
         domain: &str,
         stream: AutoProxyClientStream,
+        ignore_invalid_certs: bool,
     ) -> io::Result<HttpConnection<B>> {
         trace!("HTTP making new TLS connection to host: {}, scheme: {}", host, scheme);
 
         // TLS handshake, check alpn for h2 support.
-        let stream = ProxyHttpStream::connect_https(stream, domain).await?;
+        let stream = ProxyHttpStream::connect_https(stream, domain, ignore_invalid_certs).await?;
 
         if stream.negotiated_http2() {
             // H2 connection

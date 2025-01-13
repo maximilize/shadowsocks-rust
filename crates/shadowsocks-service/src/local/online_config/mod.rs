@@ -51,7 +51,7 @@ impl OnlineConfigServiceBuilder {
     pub async fn build(self) -> io::Result<OnlineConfigService> {
         let mut service = OnlineConfigService {
             context: self.context,
-            http_client: HttpClient::new(),
+            http_client: HttpClient::default(),
             config_url: self.config_url,
             config_update_interval: self.config_update_interval,
             balancer: self.balancer,

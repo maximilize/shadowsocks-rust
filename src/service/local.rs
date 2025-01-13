@@ -831,6 +831,11 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
                 }
             }
 
+            #[cfg(feature = "local-http")]
+            if let Some(ignore_invalid_certs) = matches.get_one::<bool>("IGNORE_INVALID_CERTS") {
+                local_config.ignore_invalid_certs = *ignore_invalid_certs;
+            }
+
             if matches.get_flag("UDP_ONLY") {
                 local_config.mode = Mode::UdpOnly;
             }
@@ -939,8 +944,11 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         // DONE READING options
 
         if config.local.is_empty() {
-            return Err(ShadowsocksError::InsufficientParams("missing `local_address`, consider specifying it by --local-addr command line option, \
-                    or \"local_address\" and \"local_port\" in configuration file".to_string()));
+            return Err(ShadowsocksError::InsufficientParams(
+                "missing `local_address`, consider specifying it by --local-addr command line option, \
+                    or \"local_address\" and \"local_port\" in configuration file"
+                    .to_string(),
+            ));
         }
 
         config

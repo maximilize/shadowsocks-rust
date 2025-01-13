@@ -337,6 +337,10 @@ struct SSLocalExtConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_dns_database_path: Option<String>,
 
+    /// HTTP
+    #[cfg(feature = "local-http")]
+    pub ignore_invalid_certs: Option<bool>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     acl: Option<String>,
 }
@@ -1043,6 +1047,9 @@ pub struct LocalConfig {
     /// Fake DNS storage database path
     #[cfg(feature = "local-fake-dns")]
     pub fake_dns_database_path: Option<PathBuf>,
+
+    #[cfg(feature = "local-http")]
+    pub ignore_invalid_certs: bool,
 }
 
 impl LocalConfig {
@@ -1109,6 +1116,8 @@ impl LocalConfig {
             fake_dns_ipv6_network: None,
             #[cfg(feature = "local-fake-dns")]
             fake_dns_database_path: None,
+
+            ignore_invalid_certs: false,
         }
     }
 
@@ -1846,6 +1855,11 @@ impl Config {
                             if let Some(p) = local.fake_dns_database_path {
                                 local_config.fake_dns_database_path = Some(p.into());
                             }
+                        }
+
+                        #[cfg(feature = "local-http")]
+                        if let Some(ignore_invalid_certs) = local.ignore_invalid_certs {
+                            local_config.ignore_invalid_certs = ignore_invalid_certs;
                         }
 
                         let mut local_instance = LocalInstanceConfig {
@@ -2938,6 +2952,9 @@ impl fmt::Display for Config {
                             .fake_dns_database_path
                             .as_ref()
                             .and_then(|n| n.to_str().map(ToOwned::to_owned)),
+
+                        #[cfg(feature = "local-http")]
+                        ignore_invalid_certs: Some(local.ignore_invalid_certs),
 
                         acl: local_instance
                             .acl

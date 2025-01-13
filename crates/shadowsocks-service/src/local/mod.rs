@@ -347,7 +347,12 @@ impl Server {
                     };
 
                     #[allow(unused_mut)]
-                    let mut builder = HttpBuilder::with_context(context.clone(), client_addr, balancer);
+                    let mut builder = HttpBuilder::with_context(
+                        context.clone(),
+                        client_addr,
+                        balancer,
+                        local_config.ignore_invalid_certs,
+                    );
 
                     #[cfg(target_os = "macos")]
                     if let Some(n) = local_config.launchd_tcp_socket_name {

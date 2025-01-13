@@ -23,15 +23,16 @@ pub struct HttpBuilder {
     context: Arc<ServiceContext>,
     client_config: ServerAddr,
     balancer: PingBalancer,
+    ignore_invalid_certs: bool,
     #[cfg(target_os = "macos")]
     launchd_tcp_socket_name: Option<String>,
 }
 
 impl HttpBuilder {
     /// Create a new HTTP Local server builder
-    pub fn new(client_config: ServerAddr, balancer: PingBalancer) -> HttpBuilder {
+    pub fn new(client_config: ServerAddr, balancer: PingBalancer, ignore_invalid_certs: bool) -> HttpBuilder {
         let context = ServiceContext::new();
-        HttpBuilder::with_context(Arc::new(context), client_config, balancer)
+        HttpBuilder::with_context(Arc::new(context), client_config, balancer, ignore_invalid_certs)
     }
 
     /// Create with an existed context
@@ -39,11 +40,13 @@ impl HttpBuilder {
         context: Arc<ServiceContext>,
         client_config: ServerAddr,
         balancer: PingBalancer,
+        ignore_invalid_certs: bool,
     ) -> HttpBuilder {
         HttpBuilder {
             context,
             client_config,
             balancer,
+            ignore_invalid_certs,
             #[cfg(target_os = "macos")]
             launchd_tcp_socket_name: None,
         }
@@ -79,6 +82,7 @@ impl HttpBuilder {
             context: self.context,
             listener,
             balancer: self.balancer,
+            ignore_invalid_certs: self.ignore_invalid_certs,
         })
     }
 }
@@ -88,6 +92,7 @@ pub struct Http {
     context: Arc<ServiceContext>,
     listener: TcpListener,
     balancer: PingBalancer,
+    ignore_invalid_certs: bool,
 }
 
 impl Http {
@@ -105,8 +110,11 @@ impl Http {
             "shadowsocks HTTP listening on {}",
             self.listener.local_addr().expect("http local_addr")
         );
+        if self.ignore_invalid_certs {
+            info!("HTTP server is running in insecure mode");
+        }
 
-        let handler = HttpConnectionHandler::new(self.context, self.balancer);
+        let handler = HttpConnectionHandler::new(self.context, self.balancer, self.ignore_invalid_certs);
 
         loop {
             let (stream, peer_addr) = match self.listener.accept().await {
@@ -141,11 +149,15 @@ pub struct HttpConnectionHandler {
 
 impl HttpConnectionHandler {
     /// Create a new Handler
-    pub fn new(context: Arc<ServiceContext>, balancer: PingBalancer) -> HttpConnectionHandler {
+    pub fn new(
+        context: Arc<ServiceContext>,
+        balancer: PingBalancer,
+        ignore_invalid_certs: bool,
+    ) -> HttpConnectionHandler {
         HttpConnectionHandler {
             context,
             balancer,
-            http_client: HttpClient::new(),
+            http_client: HttpClient::new(ignore_invalid_certs),
         }
     }
 

@@ -54,6 +54,20 @@ impl HttpService {
     ) -> hyper::Result<Response<BoxBody<Bytes, hyper::Error>>> {
         trace!("request {} {:?}", self.peer_addr, req);
 
+        // Allow use of full URL's in the request line
+        let uri_str = req.uri().to_string();
+        if uri_str.starts_with("/http://") || uri_str.starts_with("/https://") {
+            let new_uri_str = &uri_str[1..];
+            let new_uri = Uri::from_str(new_uri_str).expect("Invalid URI");
+            *req.uri_mut() = new_uri;
+
+            let authority = req.uri().authority().map(|a| a.to_string());
+            if let Some(authority) = authority {
+                req.headers_mut()
+                    .insert("Host", HeaderValue::from_str(&authority).expect("Invalid Host header"));
+            }
+        }
+
         // Parse URI
         //
         // Proxy request URI must contains a host

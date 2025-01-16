@@ -106,7 +106,8 @@ impl ProxyHttpStream {
                 .with_no_client_auth();
 
             // Try to negotiate HTTP/2
-            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            // config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            config.alpn_protocols = vec![b"http/1.1".to_vec()];
             Arc::new(config)
         });
 
@@ -140,7 +141,8 @@ impl ProxyHttpStream {
                 .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
 
             // Try to negotiate HTTP/2
-            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            // config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+            config.alpn_protocols = vec![b"http/1.1".to_vec()];
             Arc::new(config)
         });
 

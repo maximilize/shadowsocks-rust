@@ -105,7 +105,7 @@ impl SocksTcpServer {
         // If UDP is enabled, SOCK5 UDP_ASSOCIATE command will let client to send requests to this address
         let udp_associate_addr = Arc::new(self.udp_associate_addr);
         #[cfg(feature = "local-http")]
-        let http_handler = HttpConnectionHandler::new(self.context.clone(), self.balancer.clone(), false);
+        let http_handler = HttpConnectionHandler::default(self.context.clone(), self.balancer.clone());
 
         loop {
             let (stream, peer_addr) = match self.listener.accept().await {

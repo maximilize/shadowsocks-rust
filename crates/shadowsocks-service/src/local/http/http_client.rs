@@ -7,12 +7,13 @@ use std::{
     future::Future,
     io::{self, ErrorKind},
     pin::Pin,
+    str::FromStr,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
-use http::{header::InvalidHeaderValue, HeaderValue, Method as HttpMethod, Uri, Version as HttpVersion};
+use http::{header::InvalidHeaderValue, uri::Parts, HeaderValue, Method as HttpMethod, Uri, Version as HttpVersion};
 use hyper::{
     body::{self, Body},
     client::conn::{http1, http2},
@@ -103,6 +104,7 @@ pub struct HttpClient<B> {
     #[allow(clippy::type_complexity)]
     cache_conn: Arc<Mutex<LruCache<Address, VecDeque<(HttpConnection<B>, Instant)>>>>,
     ignore_invalid_certs: bool,
+    rewrite_http_location_headers: bool,
 }
 
 impl<B> Clone for HttpClient<B> {
@@ -110,6 +112,7 @@ impl<B> Clone for HttpClient<B> {
         HttpClient {
             cache_conn: self.cache_conn.clone(),
             ignore_invalid_certs: self.ignore_invalid_certs,
+            rewrite_http_location_headers: self.rewrite_http_location_headers,
         }
     }
 }
@@ -121,7 +124,7 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     fn default() -> Self {
-        HttpClient::new(false)
+        HttpClient::new(false, false)
     }
 }
 
@@ -132,10 +135,11 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     /// Create a new HttpClient
-    pub fn new(ignore_invalid_certs: bool) -> HttpClient<B> {
+    pub fn new(ignore_invalid_certs: bool, rewrite_http_location_headers: bool) -> HttpClient<B> {
         HttpClient {
             cache_conn: Arc::new(Mutex::new(LruCache::with_expiry_duration(CONNECTION_EXPIRE_DURATION))),
             ignore_invalid_certs,
+            rewrite_http_location_headers,
         }
     }
 
@@ -227,15 +231,59 @@ where
         None
     }
 
+    #[inline]
+    fn handle_redirect(&self, base: Parts, next: Parts) -> String {
+        let mut new = Uri::builder();
+
+        if next.path_and_query.is_some() {
+            // new.path_and_query(PathAndQuery::from(next.path_and_query.unwrap()));
+            new = new.path_and_query(next.path_and_query.unwrap());
+        } else {
+            new = new.path_and_query(base.path_and_query.unwrap());
+        }
+
+        if next.authority.is_some() {
+            new = new.authority(next.authority.unwrap());
+        } else {
+            new = new.authority(base.authority.unwrap());
+        }
+
+        if next.scheme.is_some() {
+            new = new.scheme(next.scheme.unwrap());
+        } else {
+            new = new.scheme(base.scheme.unwrap());
+        }
+
+        return new.build().unwrap().to_string();
+    }
+
     async fn send_request_conn(
         &self,
         host: Address,
         mut c: HttpConnection<B>,
         req: Request<B>,
     ) -> Result<Response<body::Incoming>, HttpClientError> {
+        let base_uri = req.uri().clone();
+
         trace!("HTTP making request to host: {}, request: {:?}", host, req);
-        let response = c.send_request(req).await?;
+        let mut response = c.send_request(req).await?;
         trace!("HTTP received response from host: {}, response: {:?}", host, response);
+
+        // Check if the response is a redirect and contains a Location header
+        if self.rewrite_http_location_headers && response.status().is_redirection() {
+            if let Some(location) = response.headers().get("location") {
+                if let Ok(location_str) = location.to_str() {
+                    if let Ok(location_uri) = Uri::from_str(location_str) {
+                        let next = self.handle_redirect(base_uri.into_parts(), location_uri.into_parts());
+                        let next_mod = format!("/{}", next);
+                        trace!("Rewriting HTTP redirect from {} to {}", location_str, next_mod);
+                        response
+                            .headers_mut()
+                            .insert("location", HeaderValue::from_str(&next_mod)?);
+                    }
+                }
+            }
+        }
 
         // Check keep-alive
         if check_keep_alive(response.version(), response.headers(), false) {

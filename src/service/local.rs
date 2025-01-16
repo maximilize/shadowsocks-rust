@@ -832,8 +832,13 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
             }
 
             #[cfg(feature = "local-http")]
-            if let Some(ignore_invalid_certs) = matches.get_one::<bool>("IGNORE_INVALID_CERTS") {
-                local_config.ignore_invalid_certs = *ignore_invalid_certs;
+            {
+                if let Some(ignore_invalid_certs) = matches.get_one::<bool>("IGNORE_INVALID_CERTS") {
+                    local_config.ignore_invalid_certs = *ignore_invalid_certs;
+                }
+                if let Some(rewrite_http_location_headers) = matches.get_one::<bool>("REWRITE_HTTP_LOCATION_HEADERS") {
+                    local_config.rewrite_http_location_headers = *rewrite_http_location_headers;
+                }
             }
 
             if matches.get_flag("UDP_ONLY") {

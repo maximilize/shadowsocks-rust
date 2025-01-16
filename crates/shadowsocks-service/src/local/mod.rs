@@ -352,6 +352,7 @@ impl Server {
                         client_addr,
                         balancer,
                         local_config.ignore_invalid_certs,
+                        local_config.rewrite_http_location_headers,
                     );
 
                     #[cfg(target_os = "macos")]

@@ -24,15 +24,27 @@ pub struct HttpBuilder {
     client_config: ServerAddr,
     balancer: PingBalancer,
     ignore_invalid_certs: bool,
+    rewrite_http_location_headers: bool,
     #[cfg(target_os = "macos")]
     launchd_tcp_socket_name: Option<String>,
 }
 
 impl HttpBuilder {
     /// Create a new HTTP Local server builder
-    pub fn new(client_config: ServerAddr, balancer: PingBalancer, ignore_invalid_certs: bool) -> HttpBuilder {
+    pub fn new(
+        client_config: ServerAddr,
+        balancer: PingBalancer,
+        ignore_invalid_certs: bool,
+        rewrite_http_location_headers: bool,
+    ) -> HttpBuilder {
         let context = ServiceContext::new();
-        HttpBuilder::with_context(Arc::new(context), client_config, balancer, ignore_invalid_certs)
+        HttpBuilder::with_context(
+            Arc::new(context),
+            client_config,
+            balancer,
+            ignore_invalid_certs,
+            rewrite_http_location_headers,
+        )
     }
 
     /// Create with an existed context
@@ -41,12 +53,14 @@ impl HttpBuilder {
         client_config: ServerAddr,
         balancer: PingBalancer,
         ignore_invalid_certs: bool,
+        rewrite_http_location_headers: bool,
     ) -> HttpBuilder {
         HttpBuilder {
             context,
             client_config,
             balancer,
             ignore_invalid_certs,
+            rewrite_http_location_headers,
             #[cfg(target_os = "macos")]
             launchd_tcp_socket_name: None,
         }
@@ -83,6 +97,7 @@ impl HttpBuilder {
             listener,
             balancer: self.balancer,
             ignore_invalid_certs: self.ignore_invalid_certs,
+            rewrite_http_location_headers: self.rewrite_http_location_headers,
         })
     }
 }
@@ -93,6 +108,7 @@ pub struct Http {
     listener: TcpListener,
     balancer: PingBalancer,
     ignore_invalid_certs: bool,
+    rewrite_http_location_headers: bool,
 }
 
 impl Http {
@@ -114,7 +130,12 @@ impl Http {
             info!("HTTP server is running in insecure mode");
         }
 
-        let handler = HttpConnectionHandler::new(self.context, self.balancer, self.ignore_invalid_certs);
+        let handler = HttpConnectionHandler::new(
+            self.context,
+            self.balancer,
+            self.ignore_invalid_certs,
+            self.rewrite_http_location_headers,
+        );
 
         loop {
             let (stream, peer_addr) = match self.listener.accept().await {
@@ -153,11 +174,21 @@ impl HttpConnectionHandler {
         context: Arc<ServiceContext>,
         balancer: PingBalancer,
         ignore_invalid_certs: bool,
+        rewrite_http_location_headers: bool,
     ) -> HttpConnectionHandler {
         HttpConnectionHandler {
             context,
             balancer,
-            http_client: HttpClient::new(ignore_invalid_certs),
+            http_client: HttpClient::new(ignore_invalid_certs, rewrite_http_location_headers),
+        }
+    }
+
+    /// Create a new Handler with default values
+    pub fn default(context: Arc<ServiceContext>, balancer: PingBalancer) -> HttpConnectionHandler {
+        HttpConnectionHandler {
+            context,
+            balancer,
+            http_client: HttpClient::default(),
         }
     }
 

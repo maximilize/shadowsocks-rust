@@ -110,7 +110,6 @@ pub struct HttpClient<B> {
 
 impl<B> Clone for HttpClient<B> {
     fn clone(&self) -> Self {
-        error!("HTTP client cloned");
         HttpClient {
             cache_conn: self.cache_conn.clone(),
             ignore_invalid_certs: self.ignore_invalid_certs,
@@ -143,7 +142,6 @@ where
         rewrite_http_location_headers: bool,
         ignore_keep_alive: bool,
     ) -> HttpClient<B> {
-        error!("HTTP client created");
         HttpClient {
             cache_conn: Arc::new(Mutex::new(LruCache::with_expiry_duration(CONNECTION_EXPIRE_DURATION))),
             ignore_invalid_certs,

@@ -342,6 +342,8 @@ struct SSLocalExtConfig {
     pub ignore_invalid_certs: Option<bool>,
     #[cfg(feature = "local-http")]
     pub rewrite_http_location_headers: Option<bool>,
+    #[cfg(feature = "local-http")]
+    pub ignore_keep_alive: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     acl: Option<String>,
@@ -1054,6 +1056,8 @@ pub struct LocalConfig {
     pub ignore_invalid_certs: bool,
     #[cfg(feature = "local-http")]
     pub rewrite_http_location_headers: bool,
+    #[cfg(feature = "local-http")]
+    pub ignore_keep_alive: bool,
 }
 
 impl LocalConfig {
@@ -1123,6 +1127,7 @@ impl LocalConfig {
 
             ignore_invalid_certs: false,
             rewrite_http_location_headers: false,
+            ignore_keep_alive: false,
         }
     }
 
@@ -1870,6 +1875,11 @@ impl Config {
                         #[cfg(feature = "local-http")]
                         if let Some(rewrite_http_location_headers) = local.rewrite_http_location_headers {
                             local_config.rewrite_http_location_headers = rewrite_http_location_headers;
+                        }
+
+                        #[cfg(feature = "local-http")]
+                        if let Some(ignore_keep_alive) = local.ignore_keep_alive {
+                            local_config.ignore_keep_alive = ignore_keep_alive;
                         }
 
                         let mut local_instance = LocalInstanceConfig {
@@ -2967,6 +2977,8 @@ impl fmt::Display for Config {
                         ignore_invalid_certs: Some(local.ignore_invalid_certs),
                         #[cfg(feature = "local-http")]
                         rewrite_http_location_headers: Some(local.rewrite_http_location_headers),
+                        #[cfg(feature = "local-http")]
+                        ignore_keep_alive: Some(local.ignore_keep_alive),
 
                         acl: local_instance
                             .acl

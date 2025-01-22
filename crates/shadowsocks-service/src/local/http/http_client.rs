@@ -105,14 +105,17 @@ pub struct HttpClient<B> {
     cache_conn: Arc<Mutex<LruCache<Address, VecDeque<(HttpConnection<B>, Instant)>>>>,
     ignore_invalid_certs: bool,
     rewrite_http_location_headers: bool,
+    ignore_keep_alive: bool,
 }
 
 impl<B> Clone for HttpClient<B> {
     fn clone(&self) -> Self {
+        error!("HTTP client cloned");
         HttpClient {
             cache_conn: self.cache_conn.clone(),
             ignore_invalid_certs: self.ignore_invalid_certs,
             rewrite_http_location_headers: self.rewrite_http_location_headers,
+            ignore_keep_alive: self.ignore_keep_alive,
         }
     }
 }
@@ -124,7 +127,7 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     fn default() -> Self {
-        HttpClient::new(false, false)
+        HttpClient::new(false, false, false)
     }
 }
 
@@ -135,11 +138,17 @@ where
     B::Error: Into<Box<dyn ::std::error::Error + Send + Sync>>,
 {
     /// Create a new HttpClient
-    pub fn new(ignore_invalid_certs: bool, rewrite_http_location_headers: bool) -> HttpClient<B> {
+    pub fn new(
+        ignore_invalid_certs: bool,
+        rewrite_http_location_headers: bool,
+        ignore_keep_alive: bool,
+    ) -> HttpClient<B> {
+        error!("HTTP client created");
         HttpClient {
             cache_conn: Arc::new(Mutex::new(LruCache::with_expiry_duration(CONNECTION_EXPIRE_DURATION))),
             ignore_invalid_certs,
             rewrite_http_location_headers,
+            ignore_keep_alive,
         }
     }
 
@@ -179,9 +188,11 @@ where
         // 1. Check if there is an available client
         //
         // FIXME: If the cached connection is closed unexpectedly, this request will fail immediately.
-        if let Some(c) = self.get_cached_connection(&host).await {
-            trace!("HTTP client for host: {} taken from cache", host);
-            return self.send_request_conn(host, c, req).await;
+        if !self.ignore_keep_alive {
+            if let Some(c) = self.get_cached_connection(&host).await {
+                trace!("HTTP client for host: {} taken from cache", host);
+                return self.send_request_conn(host, c, req).await;
+            }
         }
 
         // 2. If no. Make a new connection
@@ -286,7 +297,7 @@ where
         }
 
         // Check keep-alive
-        if check_keep_alive(response.version(), response.headers(), false) {
+        if !self.ignore_keep_alive && check_keep_alive(response.version(), response.headers(), false) {
             trace!(
                 "HTTP connection keep-alive for host: {}, response: {:?}",
                 host,

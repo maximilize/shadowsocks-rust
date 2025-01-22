@@ -2,7 +2,7 @@
 //!
 //! https://www.ietf.org/rfc/rfc2068.txt
 
-use std::{io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{error::Error, io, net::SocketAddr, sync::Arc, time::Duration};
 
 use hyper::{body, server::conn::http1, service};
 use log::{error, info, trace};
@@ -25,6 +25,7 @@ pub struct HttpBuilder {
     balancer: PingBalancer,
     ignore_invalid_certs: bool,
     rewrite_http_location_headers: bool,
+    ignore_keep_alive: bool,
     #[cfg(target_os = "macos")]
     launchd_tcp_socket_name: Option<String>,
 }
@@ -36,6 +37,7 @@ impl HttpBuilder {
         balancer: PingBalancer,
         ignore_invalid_certs: bool,
         rewrite_http_location_headers: bool,
+        ignore_keep_alive: bool,
     ) -> HttpBuilder {
         let context = ServiceContext::new();
         HttpBuilder::with_context(
@@ -44,6 +46,7 @@ impl HttpBuilder {
             balancer,
             ignore_invalid_certs,
             rewrite_http_location_headers,
+            ignore_keep_alive,
         )
     }
 
@@ -54,6 +57,7 @@ impl HttpBuilder {
         balancer: PingBalancer,
         ignore_invalid_certs: bool,
         rewrite_http_location_headers: bool,
+        ignore_keep_alive: bool,
     ) -> HttpBuilder {
         HttpBuilder {
             context,
@@ -61,6 +65,7 @@ impl HttpBuilder {
             balancer,
             ignore_invalid_certs,
             rewrite_http_location_headers,
+            ignore_keep_alive,
             #[cfg(target_os = "macos")]
             launchd_tcp_socket_name: None,
         }
@@ -98,6 +103,7 @@ impl HttpBuilder {
             balancer: self.balancer,
             ignore_invalid_certs: self.ignore_invalid_certs,
             rewrite_http_location_headers: self.rewrite_http_location_headers,
+            ignore_keep_alive: self.ignore_keep_alive,
         })
     }
 }
@@ -109,6 +115,7 @@ pub struct Http {
     balancer: PingBalancer,
     ignore_invalid_certs: bool,
     rewrite_http_location_headers: bool,
+    ignore_keep_alive: bool,
 }
 
 impl Http {
@@ -135,6 +142,7 @@ impl Http {
             self.balancer,
             self.ignore_invalid_certs,
             self.rewrite_http_location_headers,
+            self.ignore_keep_alive,
         );
 
         loop {
@@ -151,7 +159,13 @@ impl Http {
             let handler = handler.clone();
             tokio::spawn(async move {
                 if let Err(err) = handler.serve_connection(stream, peer_addr).await {
-                    error!("HTTP connection {} handler failed with error: {}", peer_addr, err);
+                    let cause = err
+                        .source()
+                        .map_or_else(|| "".to_string(), |e| format!("caused by: {}", e));
+                    error!(
+                        "HTTP connection {} handler failed with error: {} - {}",
+                        peer_addr, err, cause
+                    );
                 }
             });
         }
@@ -175,11 +189,12 @@ impl HttpConnectionHandler {
         balancer: PingBalancer,
         ignore_invalid_certs: bool,
         rewrite_http_location_headers: bool,
+        ignore_keep_alive: bool,
     ) -> HttpConnectionHandler {
         HttpConnectionHandler {
             context,
             balancer,
-            http_client: HttpClient::new(ignore_invalid_certs, rewrite_http_location_headers),
+            http_client: HttpClient::new(ignore_invalid_certs, rewrite_http_location_headers, ignore_keep_alive),
         }
     }
 

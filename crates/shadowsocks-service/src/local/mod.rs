@@ -353,6 +353,7 @@ impl Server {
                         balancer,
                         local_config.ignore_invalid_certs,
                         local_config.rewrite_http_location_headers,
+                        local_config.ignore_keep_alive,
                     );
 
                     #[cfg(target_os = "macos")]
